@@ -39,6 +39,10 @@ module BrowserifyRails
       @browserifyinc_cmd ||= File.join(config.node_bin, "browserifyinc").freeze
     end
 
+    def exorcist_cmd
+      rails_path(File.join(config.node_bin, "exorcist").freeze)
+    end
+
     def ensure_tmp_dir_exists!
       FileUtils.mkdir_p(rails_path(tmp_path))
     end
@@ -119,10 +123,10 @@ module BrowserifyRails
     # NODE_ENV is set to the Rails.env. This is used by some modules to determine
     # how to build. Example: https://facebook.github.io/react/downloads.html#npm
     def env
-      {
-        "NODE_PATH" => asset_paths,
-        "NODE_ENV"  => config.node_env || Rails.env
-      }
+      env_array = {}
+      env_array["NODE_ENV"] = config.node_env || Rails.env
+      env_array["NODE_PATH"] = asset_paths unless uses_exorcist
+      env_array
     end
 
     # Run the requested version of browserify (browserify or browserifyinc)
@@ -153,7 +157,9 @@ module BrowserifyRails
       # Create a temporary file for the output. Such file is necessary when
       # using browserifyinc, but we use it in all instances for consistency
       output_file = Tempfile.new("output", rails_path(tmp_path))
-      command_options << " -o #{output_file.path.inspect}"
+      unless uses_exorcist
+        command_options << " -o #{output_file.path.inspect}"
+      end
 
       # Compose the full command (using browserify or browserifyinc as necessary)
       command = "#{browserify_command(force_browserifyinc)} #{command_options} -"
@@ -168,16 +174,37 @@ module BrowserifyRails
         raise BrowserifyRails::BrowserifyError.new("Error while running `#{command}`:\n\n#{stderr}")
       end
 
-      # Read the output that was stored in the temp file
-      output = output_file.read
+      # If using exorcist, pipe output from browserify command into exorcist
+      if uses_exorcist && logical_path
+        exorcist_command = "#{exorcist_cmd} #{File.dirname(file)}/#{logical_path.split('/')[-1]}.map"
+        Logger::log "Exorcist: #{exorcist_command}"
+        exorcist_stdout, exorcist_stderr, exorcist_status = Open3.capture3(env, 
+                                                                           exorcist_command, 
+                                                                           stdin_data: stdout, 
+                                                                           chdir: base_directory)
 
-      # Destroy the temp file (good practice)
-      output_file.close
-      output_file.unlink
+        # Uglify strips comments at the end of a file during minification
+        # Add junk JS command to the last line to prevent that
+        exorcist_stdout = exorcist_stdout + "\nvar a=1;"
+
+        if !exorcist_status.success?
+          raise BrowserifyRails::BrowserifyError.new("Error while running `#{exorcist_command}`:\n\n#{exorcist_stderr}")
+        end
+      else
+        # if not using exorcist, read the output stored in the temp file
+        output = output_file.read
+
+        # Destroy the temp file (good practice)
+        output_file.close
+        output_file.unlink
+      end
 
       # Some command flags (such as --list) make the output go to stdout,
       # ignoring -o. If this happens, we give out stdout instead.
-      if stdout.present?
+      # If we're using exorcist, then we directly use its output
+      if uses_exorcist && exorcist_stdout.present?
+        exorcist_stdout
+      elsif stdout.present?
         stdout
       else
         output
@@ -186,6 +213,10 @@ module BrowserifyRails
 
     def uses_browserifyinc(force=nil)
       !force.nil? ? force : config.use_browserifyinc
+    end
+
+    def uses_exorcist
+      config.use_exorcist
     end
 
     def browserify_command(force=nil)

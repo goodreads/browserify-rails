@@ -184,6 +184,20 @@ class BrowserifyTest < ActionController::IntegrationTest
     assert_equal expected_output, @response.body.strip
   end
 
+  test "generates sourcemap and writes to file if --use-exorcist" do
+    processor = BrowserifyRails::BrowserifyProcessor.new { |p| fixture("empty_module.js") }
+    processor.send(:config).stubs(:commandline_options).returns(["-d"])
+    Dummy::Application.config.commandline_options = ['-d']
+    Dummy::Application.config.browserify_rails.use_exorcist = true
+    expected_output = fixture("sourcemap.out.js")
+
+    get "/assets/application.js"
+
+    assert_response :success
+    assert_equal expected_output, @response.body.strip
+    Dummy::Application.config.browserify_rails.use_exorcist = false
+  end
+
   test "throws BrowserifyError if something went wrong while executing browserify" do
     File.open(File.join(Rails.root, "app/assets/javascripts/application.js"), "w+") do |f|
       f.puts "var foo = require('./foo');"
