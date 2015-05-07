@@ -167,7 +167,7 @@ module BrowserifyRails
       # The directory the command will be executed from
       base_directory = File.dirname(file)
 
-      Logger::log "Browserify: #{command}"
+      Logger.log "Browserify: #{command}"
       stdout, stderr, status = Open3.capture3(env, command, stdin_data: data, chdir: base_directory)
 
       if !status.success?
@@ -176,8 +176,8 @@ module BrowserifyRails
 
       # If using exorcist, pipe output from browserify command into exorcist
       if uses_exorcist && logical_path
-        exorcist_command = "#{exorcist_cmd} #{File.dirname(file)}/#{logical_path.split('/')[-1]}.map"
-        Logger::log "Exorcist: #{exorcist_command}"
+        exorcist_command = "#{exorcist_cmd} #{File.dirname(file)}/#{logical_path.split('/')[-1]}.map #{exorcist_options}"
+        Logger.log "Exorcist: #{exorcist_command}"
         exorcist_stdout, exorcist_stderr, exorcist_status = Open3.capture3(env, 
                                                                            exorcist_command, 
                                                                            stdin_data: stdout, 
@@ -239,6 +239,12 @@ module BrowserifyRails
       options += options_to_array(config.commandline_options) if config.commandline_options.present?
 
       options.uniq.join(" ")
+    end
+
+    def exorcist_options
+      exorcist_options = []
+      exorcist_options.push("-b #{config.exorcist_base_path}")
+      exorcist_options.join(" ")
     end
 
     def get_granular_config(logical_path)
